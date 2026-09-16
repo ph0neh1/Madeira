@@ -1,0 +1,49 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Which runner to use"
+        type: choice
+        default: "hosted"
+        options:
+          - hosted
+          - self-hosted
+
+jobs:
+  build:
+    runs-on: ${{ github.event.inputs.runner == 'self-hosted' && 'self-hosted' || 'macos-latest' }}
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Only needed on a hosted runner: a self-hosted Mac already has
+      # FEX/wine/DXMT built in its tree from a previous native build.
+      - name: Restore prebuilt native libs (hosted runner only)
+        if: github.event.inputs.runner != 'self-hosted'
+        run: |
+          gh release download build-libs \
+            --repo "${{ github.repository }}" \
+            --pattern 'madeira-build-libs.tar.gz' \
+            --output madeira-build-libs.tar.gz
+          tar -xzf madeira-build-libs.tar.gz -C .
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify build inputs are present
+        run: tools/check-build-inputs.sh
+
+      - name: Run release gates
+        run: tools/check-all.sh
+
+      - name: Build unsigned IPA
+        run: scripts/make-ipa.sh
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Madeira-unsigned
+          path: Madeira-unsigned.ipa
